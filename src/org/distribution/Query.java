@@ -4,8 +4,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,7 +47,7 @@ public class Query {
         ArrayList<String> results = new ArrayList<String>();
         final Iter ir = urls.iter();
         try {
-            List<Future<String>> stringResults = new ArrayList<Future<String>>();
+            List<Future<String>> sr = new ArrayList<Future<String>>();
             ExecutorService executor = Executors.newFixedThreadPool((int)urls.size());
             for (Item it; (it = ir.next()) != null;) {
                 final Item fit = it;
@@ -74,15 +72,14 @@ public class Query {
                             exc.printStackTrace();
                         }
                         return r;
-
                     }
                 };
-                stringResults.add(executor.submit(task));
+                sr.add(executor.submit(task));
             }
             executor.shutdown();
             while(!executor.isTerminated())
                 ;
-            for (Future<String> future : stringResults) {
+            for (Future<String> future : sr) {
                 try {
                     if (future.get() != null)
                         results.add(future.get());
