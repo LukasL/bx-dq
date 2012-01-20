@@ -1,8 +1,11 @@
 package org.distribution;
 
 import java.io.IOException;
+import java.net.SocketException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -12,6 +15,7 @@ import java.util.concurrent.Future;
 import org.basex.client.api.BaseXClient;
 import org.basex.query.QueryException;
 import org.basex.query.item.Item;
+import org.basex.query.item.Str;
 import org.basex.query.item.Value;
 import org.basex.query.iter.Iter;
 
@@ -26,11 +30,17 @@ public class Query {
     public static final String USER = "admin";
     /** Password. */
     public static final String PW = "admin";
+    /** Successful execution. */
+    public static final String OK = "Execution successful";
+
+    /** Info messages. */
+    private Map<String, String> infos;
 
     /**
      * Default constructor.
      */
     public Query() {
+        infos = new HashMap<String, String>();
     }
 
     /**
@@ -42,34 +52,44 @@ public class Query {
      * @param urls
      *            URLs identifying the available BaseX servers.
      * @return Query results from all servers.
+     * @throws InterruptedException
+     * @throws ExecutionException
+     * @throws QueryException
      */
-    public Object[] query(final String q, final Value urls) {
-        ArrayList<String> results = new ArrayList<String>();
+    public Item[] query(final Str q, final Value urls) throws InterruptedException, ExecutionException,
+        QueryException {
+        ArrayList<Item> results = new ArrayList<Item>();
         final Iter ir = urls.iter();
         try {
-            List<Future<String>> sr = new ArrayList<Future<String>>();
+            List<Future<Str>> sr = new ArrayList<Future<Str>>();
             ExecutorService executor = Executors.newFixedThreadPool((int)urls.size());
             for (Item it; (it = ir.next()) != null;) {
                 final Item fit = it;
-                Callable<String> task = new Callable<String>() {
+                Callable<Str> task = new Callable<Str>() {
 
                     @Override
-                    public String call() throws Exception {
-                        String r = null;
+                    public Str call() throws Exception {
+                        Str r = null;
                         try {
                             String url = fit.toJava().toString();
                             String[] hp = url.split(":");
                             BaseXClient bx = new BaseXClient(hp[0], Integer.valueOf(hp[1]), USER, PW);
-                            org.basex.client.api.BaseXClient.Query qr = bx.query(q);
-                            r = qr.execute();
-                            qr.close();
+                            r = Str.get(bx.execute("xquery " + q.toJava().toString()).getBytes());
                             bx.close();
+                            infos.put(url, OK);
                         } catch (QueryException exc) {
                             exc.printStackTrace();
+                            throw exc;
                         } catch (NumberFormatException exc) {
                             exc.printStackTrace();
+                            throw exc;
+                        } catch (SocketException exc) {
+                            String url = fit.toJava().toString();
+                            infos.put(url, exc.getMessage());
                         } catch (IOException exc) {
                             exc.printStackTrace();
+                            if (!(exc instanceof SocketException))
+                                throw exc;
                         }
                         return r;
                     }
@@ -79,7 +99,7 @@ public class Query {
             executor.shutdown();
             while(!executor.isTerminated())
                 ;
-            for (Future<String> future : sr) {
+            for (Future<Str> future : sr) {
                 try {
                     if (future.get() != null)
                         results.add(future.get());
@@ -87,13 +107,28 @@ public class Query {
                     e.printStackTrace();
                 } catch (ExecutionException e) {
                     e.printStackTrace();
+                    throw e;
                 }
             }
 
         } catch (QueryException exc) {
             exc.printStackTrace();
+            throw exc;
         }
+        Item[] itemResults = new Item[results.size()];
+        return results.toArray(itemResults);
+    }
 
-        return results.toArray();
+    /**
+     * Returns information to the parallel query execution and returns it to BaseX.
+     * 
+     * @return Query execution information.
+     */
+    public Str[] getInfo() {
+        Str[] info = new Str[infos.size()];
+        int i = 0;
+        for (Map.Entry<String, String> entry : infos.entrySet())
+            info[i++] = Str.get((entry.getKey() + " returned: " + entry.getValue()).getBytes());
+        return info;
     }
 }
